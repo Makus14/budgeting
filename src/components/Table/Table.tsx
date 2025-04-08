@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 
 import { Pagination } from "antd";
+import classes from "../Table/Table.module.css";
 
 const fixedColumns = [
   "y0_m01",
@@ -64,9 +65,20 @@ interface Row {
   [key: string]: string | number | null | undefined;
 }
 
+interface EditedCellValue {
+  newValue: string;
+  originalValue: string | number | null | undefined;
+}
+
 interface EditedRows {
   [rowIndex: number]: {
-    [column: string]: string; // Только строки, без null
+    [column: string]: EditedCellValue;
+  };
+}
+
+interface ChangedCells {
+  [rowIndex: number]: {
+    [column: string]: boolean;
   };
 }
 
@@ -76,6 +88,7 @@ function Table() {
   const [cfo, setCfo] = useState<Cfo[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
   const [editedRows, setEditedRows] = useState<EditedRows>({});
+  const [changedCells, setChangedCells] = useState<ChangedCells>({});
 
   const [selectedYear, setSelectedYear] = useState<string>("");
   const [selectedSce, setSelectedSce] = useState<string>("");
@@ -119,27 +132,54 @@ function Table() {
     value: string
   ) => {
     if (value === "" || /^-?\d*[,.]?\d*$/.test(value)) {
+      const originalValue = rows[rowIndex][column];
+
       setEditedRows((prev) => ({
         ...prev,
         [rowIndex]: {
           ...prev[rowIndex],
-          [column]: value, // Сохраняем "как есть" для редактирования
+          [column]: {
+            newValue: value,
+            originalValue: originalValue,
+          },
+        },
+      }));
+
+      // Помечаем как изменённое только если значение действительно изменилось
+      setChangedCells((prev) => ({
+        ...prev,
+        [rowIndex]: {
+          ...prev[rowIndex],
+          [column]: !valuesAreEqual(value, originalValue),
         },
       }));
     }
   };
 
   const saveChanges = async (rowIndex: number) => {
-    if (!editedRows[rowIndex]) return;
+    if (!editedRows[rowIndex]) {
+      console.log("Нет изменений для сохранения");
+      return;
+    }
 
+    // Подготовка данных для отправки
     const editedFields = Object.fromEntries(
-      Object.entries(editedRows[rowIndex]).map(([key, value]) => [
-        key,
-        value === null || value === ""
-          ? null
-          : Number(value.replace(/\s/g, "").replace(/,/g, ".")),
-      ])
+      Object.entries(editedRows[rowIndex])
+        .filter(
+          ([col, data]) => !valuesAreEqual(data.newValue, data.originalValue)
+        )
+        .map(([col, data]) => [
+          col,
+          data.newValue.trim() === ""
+            ? null
+            : Number(data.newValue.replace(/\s/g, "").replace(/,/g, ".")),
+        ])
     );
+
+    if (Object.keys(editedFields).length === 0) {
+      console.log("Нет реальных изменений для сохранения");
+      return;
+    }
 
     try {
       const response = await fetch("http://localhost:3000/update", {
@@ -149,7 +189,6 @@ function Table() {
           p_id: rows[rowIndex].p_id,
           editedFields: {
             ...editedFields,
-            // Явно преобразуем все значения
             ...Object.fromEntries(
               Object.entries(editedFields).map(([k, v]) => [
                 k,
@@ -159,9 +198,31 @@ function Table() {
           },
         }),
       });
-      // ... остальная логика
+
+      // Проверяем успешность запроса, но не пытаемся парсить ответ как JSON
+      if (response.ok) {
+        // Удаляем сохраненные изменения из состояний
+        setEditedRows((prev) => {
+          const newEditedRows = { ...prev };
+          delete newEditedRows[rowIndex];
+          return newEditedRows;
+        });
+
+        setChangedCells((prev) => {
+          const newChangedCells = { ...prev };
+          delete newChangedCells[rowIndex];
+          return newChangedCells;
+        });
+
+        // Обновляем данные таблицы
+        fetchTableData();
+
+        console.log("Данные успешно сохранены");
+      } else {
+        console.error("Ошибка сервера:", await response.text());
+      }
     } catch (error) {
-      console.error("Ошибка сохранения:", error);
+      console.error("Ошибка при сохранении:", error);
     }
   };
 
@@ -240,49 +301,115 @@ function Table() {
         }).format(num);
   };
 
-  // const parseInputValue = (value: string | null): string | null => {
-  //   if (value === null || value === "") return null;
-  //   return value.replace(/\s/g, "").replace(/,/g, ".");
-  // };
-
-  // const handleCellBlur = (rowIndex: number, column: string, value: string) => {
-  //   const formatted = formatNumberValue(value);
-  //   setEditedRows((prev) => ({
-  //     ...prev,
-  //     [rowIndex]: {
-  //       ...prev[rowIndex],
-  //       [column]: formatted, // Сохраняем уже отформатированное значение
-  //     },
-  //   }));
-  // };
-
   const handleCellBlur = (rowIndex: number, column: string, value: string) => {
-    // Если поле пустое — восстанавливаем значение из исходных данных (rows)
+    const originalValue = rows[rowIndex][column];
+
+    // Если поле пустое - восстанавливаем оригинальное значение
     if (value.trim() === "") {
       setEditedRows((prev) => {
         const newEditedRows = { ...prev };
-        // Удаляем запись, чтобы вернуться к исходному значению из `rows`
         if (newEditedRows[rowIndex]) {
           delete newEditedRows[rowIndex][column];
-          // Если строка стала пустой, удаляем её полностью
           if (Object.keys(newEditedRows[rowIndex]).length === 0) {
             delete newEditedRows[rowIndex];
           }
         }
         return newEditedRows;
       });
-      return; // Выходим, чтобы не сохранять пустое значение
+
+      setChangedCells((prev) => {
+        const newChangedCells = { ...prev };
+        if (newChangedCells[rowIndex]) {
+          delete newChangedCells[rowIndex][column];
+          if (Object.keys(newChangedCells[rowIndex]).length === 0) {
+            delete newChangedCells[rowIndex];
+          }
+        }
+        return newChangedCells;
+      });
+      return;
     }
 
-    // Если значение не пустое — форматируем и сохраняем
-    const formatted = formatNumberValue(value);
-    setEditedRows((prev) => ({
-      ...prev,
-      [rowIndex]: {
-        ...prev[rowIndex],
-        [column]: formatted,
-      },
-    }));
+    // Проверяем, действительно ли значение изменилось
+    const isValueChanged = !valuesAreEqual(value, originalValue);
+
+    if (isValueChanged) {
+      // Если значение изменилось - сохраняем новое
+      const formatted = formatNumberValue(value);
+      setEditedRows((prev) => ({
+        ...prev,
+        [rowIndex]: {
+          ...prev[rowIndex],
+          [column]: {
+            newValue: formatted,
+            originalValue: originalValue,
+          },
+        },
+      }));
+
+      setChangedCells((prev) => ({
+        ...prev,
+        [rowIndex]: {
+          ...prev[rowIndex],
+          [column]: true,
+        },
+      }));
+    } else {
+      // Если значение не изменилось - очищаем editedRows
+      setEditedRows((prev) => {
+        const newEditedRows = { ...prev };
+        if (newEditedRows[rowIndex]) {
+          delete newEditedRows[rowIndex][column];
+          if (Object.keys(newEditedRows[rowIndex]).length === 0) {
+            delete newEditedRows[rowIndex];
+          }
+        }
+        return newEditedRows;
+      });
+
+      setChangedCells((prev) => ({
+        ...prev,
+        [rowIndex]: {
+          ...prev[rowIndex],
+          [column]: false,
+        },
+      }));
+    }
+  };
+
+  const valuesAreEqual = (
+    newValue: string,
+    originalValue: string | number | null | undefined
+  ): boolean => {
+    // Оба значения пустые
+    if (
+      newValue.trim() === "" &&
+      (originalValue === null ||
+        originalValue === undefined ||
+        originalValue === "")
+    ) {
+      return true;
+    }
+
+    // Нормализация для сравнения (удаляем пробелы, заменяем запятые на точки)
+    const normalize = (val: string | number) =>
+      String(val).trim().replace(/\s/g, "").replace(/,/g, ".").toLowerCase();
+
+    const normalizedNew = normalize(newValue);
+    const normalizedOriginal =
+      originalValue !== null && originalValue !== undefined
+        ? normalize(originalValue)
+        : "";
+
+    return normalizedNew === normalizedOriginal;
+  };
+
+  const hasRowChanges = (rowIndex: number): boolean => {
+    if (!editedRows[rowIndex]) return false;
+
+    return Object.entries(editedRows[rowIndex]).some(
+      ([col, data]) => !valuesAreEqual(data.newValue, data.originalValue)
+    );
   };
 
   return (
@@ -564,12 +691,21 @@ function Table() {
                   >
                     {getVisibleColumns().map((col) => {
                       const editable = isEditable(col);
-                      const value =
-                        editedRows[rowIndex]?.[col] ?? row[col] ?? "";
-
+                      const cellData = editedRows[rowIndex]?.[col];
+                      const originalValue = row[col];
+                      const displayValue = cellData
+                        ? cellData.newValue
+                        : formatNumberValue(originalValue ?? "");
+                      const isChanged = cellData
+                        ? !valuesAreEqual(
+                            cellData.newValue,
+                            cellData.originalValue
+                          )
+                        : false;
                       return (
                         <td
                           key={col}
+                          className={isChanged ? classes.changedCell : ""}
                           style={{
                             textAlign: "center",
                             padding: "8px",
@@ -577,6 +713,7 @@ function Table() {
                             backgroundColor: !editable
                               ? "rgba(130, 126, 126, 0.48)"
                               : "white",
+                            position: "relative", // Важно для позиционирования уголка
                           }}
                         >
                           {editable ? (
@@ -588,39 +725,15 @@ function Table() {
                                 border: "none",
                               }}
                               type="text"
-                              value={
-                                editedRows[rowIndex]?.[col] !== undefined
-                                  ? editedRows[rowIndex][col]
-                                  : formatNumberValue(row[col])
-                              }
+                              value={displayValue}
                               onChange={(e) =>
                                 handleCellChange(rowIndex, col, e.target.value)
                               }
                               onBlur={(e) => {
-                                if (e.target.value.trim() === "") {
-                                  const prevValue = row[col];
-                                  // Преобразуем значение к строке и проверяем на null/undefined
-                                  const stringValue =
-                                    prevValue !== null &&
-                                    prevValue !== undefined
-                                      ? String(prevValue)
-                                      : ""; // или другое значение по умолчанию
-
-                                  setEditedRows((prev) => ({
-                                    ...prev,
-                                    [rowIndex]: {
-                                      ...prev[rowIndex],
-                                      [col]: stringValue, // Теперь точно строка
-                                    },
-                                  }));
-                                } else {
-                                  handleCellBlur(rowIndex, col, e.target.value);
-                                }
+                                handleCellBlur(rowIndex, col, e.target.value);
                               }}
                               onFocus={(e) => {
-                                // При фокусе показываем "сырое" число без форматирования
-                                const rawValue =
-                                  editedRows[rowIndex]?.[col] ?? row[col];
+                                const rawValue = cellData?.newValue ?? row[col];
                                 e.target.value =
                                   rawValue !== null && rawValue !== undefined
                                     ? String(rawValue)
@@ -639,7 +752,7 @@ function Table() {
                                 fontSize: "14px",
                               }}
                             >
-                              {formatNumberValue(value)}
+                              {formatNumberValue(displayValue)}
                             </div>
                           )}
                         </td>
@@ -707,11 +820,17 @@ function Table() {
                         style={{
                           border: "1px solid #ccc",
                           background: "white",
-                          cursor: "pointer",
+                          cursor: hasRowChanges(rowIndex)
+                            ? "pointer"
+                            : "not-allowed",
                           padding: "2px 5px",
                           borderRadius: "3px",
+                          opacity: hasRowChanges(rowIndex) ? 1 : 0.5,
                         }}
-                        onClick={() => saveChanges(rowIndex)}
+                        onClick={() =>
+                          hasRowChanges(rowIndex) && saveChanges(rowIndex)
+                        }
+                        disabled={!hasRowChanges(rowIndex)}
                       >
                         💾
                       </button>

@@ -1,0 +1,20 @@
+.changedCell {
+  position: relative;
+}
+
+.changedCell::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 10px;
+  height: 10px;
+  background-color: #86c2fa;
+  border-bottom-left-radius: 6px;
+  z-index: 1;
+}
+
+/* Для темной темы */
+.darkMode .changedCell::after {
+  background-color: #177ddc;
+}
