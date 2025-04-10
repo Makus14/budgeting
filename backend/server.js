@@ -228,6 +228,81 @@ app.post("/update", async (req, res) => {
   }
 });
 
+app.post("/update-all", async (req, res) => {
+  const { changes } = req.body;
+
+  if (!changes || !Array.isArray(changes) || changes.length === 0) {
+    return res
+      .status(400)
+      .json({ success: false, message: "Нет данных для обновления" });
+  }
+
+  // Начинаем транзакцию
+  await client.query("BEGIN");
+
+  try {
+    const results = [];
+
+    for (const change of changes) {
+      const { p_id, editedFields } = change;
+
+      if (!p_id) {
+        throw new Error("Не указан p_id для обновления");
+      }
+
+      if (!editedFields || Object.keys(editedFields).length === 0) {
+        continue;
+      }
+
+      const updates = [];
+      const values = [];
+      let paramIndex = 2; // Начинаем с 2, так как p_id будет $1
+
+      for (const [column, value] of Object.entries(editedFields)) {
+        const match = column.match(/(y[01])_m(\d+)/);
+        if (!match) continue;
+
+        const arrayName = match[1];
+        const index = parseInt(match[2], 10);
+
+        updates.push(`${arrayName}[${index}] = $${paramIndex}`);
+
+        // Преобразуем значение в число, если оно не null
+        const parsedValue = value === null ? null : Number(value);
+        values.push(parsedValue);
+
+        paramIndex++;
+      }
+
+      if (updates.length === 0) continue;
+
+      const query = `
+        UPDATE data_mart.plan
+        SET ${updates.join(", ")}
+        WHERE id = $1
+        RETURNING id;
+      `;
+
+      const result = await client.query(query, [p_id, ...values]);
+      results.push(result.rows[0].id);
+    }
+
+    await client.query("COMMIT");
+    res.json({
+      success: true,
+      message: `Успешно обновлено ${results.length} записей`,
+      updatedIds: results,
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Ошибка массового обновления:", err);
+    res.status(500).json({
+      success: false,
+      message: err.message || "Ошибка сервера при массовом обновлении",
+    });
+  }
+});
+
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
 });

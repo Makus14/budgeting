@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 
 import { Pagination } from "antd";
-import classes from "../Table/Table.module.css";
+import classes from "./Table.module.css";
 
 const fixedColumns = [
   "y0_m01",
@@ -223,6 +223,86 @@ function Table() {
       }
     } catch (error) {
       console.error("Ошибка при сохранении:", error);
+    }
+  };
+
+  const saveAllChanges = async () => {
+    // Собираем все изменения из editedRows с явной типизацией
+    const changesToSave = Object.entries(editedRows)
+      .map(
+        ([rowIndex, rowChanges]): {
+          p_id: number | undefined;
+          editedFields: Record<string, string | number | null>;
+        } => {
+          const rowId = rows[Number(rowIndex)]?.p_id;
+
+          // Явно типизируем entries
+          const changesEntries = Object.entries(rowChanges) as Array<
+            [string, EditedCellValue]
+          >;
+
+          // Фильтруем и преобразуем изменения
+          const editedFields = Object.fromEntries(
+            changesEntries
+              .filter(
+                ([_, cellData]) =>
+                  !valuesAreEqual(cellData.newValue, cellData.originalValue)
+              )
+              .map(([column, cellData]) => [
+                column,
+                cellData.newValue.trim() === ""
+                  ? null
+                  : Number(
+                      cellData.newValue.replace(/\s/g, "").replace(/,/g, ".")
+                    ),
+              ])
+          );
+
+          return {
+            p_id: rowId,
+            editedFields,
+          };
+        }
+      )
+      .filter(
+        (
+          change
+        ): change is {
+          p_id: number;
+          editedFields: Record<string, string | number | null>;
+        } =>
+          change.p_id !== undefined &&
+          Object.keys(change.editedFields).length > 0
+      );
+
+    if (changesToSave.length === 0) {
+      alert("Нет изменений для сохранения");
+      return;
+    }
+
+    try {
+      const response = await fetch("http://localhost:3000/update-all", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ changes: changesToSave }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || "Ошибка сервера");
+      }
+
+      // Очищаем состояния
+      setEditedRows({});
+      setChangedCells({});
+
+      // Обновляем данные
+      await fetchTableData();
+
+      alert("Все изменения успешно сохранены");
+    } catch (error) {
+      console.error("Ошибка сохранения:", error);
+      alert(error instanceof Error ? error.message : "Ошибка при сохранении");
     }
   };
 
@@ -547,6 +627,7 @@ function Table() {
         </div>
 
         <button
+          className={classes.buttonClick}
           style={{
             border: "1px solid black",
             padding: 0,
@@ -564,7 +645,7 @@ function Table() {
 
       <div
         style={{
-          display: "flex",
+          display: rows.length === 0 ? "none" : "flex",
           width: "100%",
           overflowX: "hidden",
           position: "relative",
@@ -578,8 +659,13 @@ function Table() {
           style={
             {
               display: "flex",
+              flexDirection: "column",
               // width: "100%",
+              alignItems: "center",
               margin: "20px",
+              backgroundColor: "white",
+              borderRadius: "10px",
+              boxShadow: "0px 0px 10px 5px rgb(0, 0, 0, 0.2)",
               overflowX: "auto", // Разрешаем скролл для всей таблицы
               scrollbarWidth: "none", // Скрываем скроллбар для Firefox
               msOverflowStyle: "none", // Скрываем скроллбар для IE
@@ -587,258 +673,389 @@ function Table() {
             } as React.CSSProperties
           }
         >
-          {/* Фиксированная первая колонка (Счет) */}
           <div
             style={{
-              display: rows.length === 0 ? "none" : "",
-              position: "sticky",
-              left: 0,
-              zIndex: 2,
-              backgroundColor: "#e3eff4",
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "center",
+              alignItems: "center",
+              backgroundColor: "white",
+              height: "auto",
+              width: "98%",
+              gap: "10px",
             }}
           >
-            <table
+            <div
               style={{
-                borderCollapse: "collapse",
-                height: "542px",
-                width: "300px",
+                display: "flex",
+                flexDirection: "row",
+                justifyContent: "space-between",
+                marginTop: "10px",
+                width: "100%",
               }}
             >
-              <thead>
-                <tr>
-                  <th
-                    style={{
-                      // Уменьшенный padding
-                      textAlign: "center",
-                      border: "1px solid black",
-                      backgroundColor: "#f9f9f9",
-                      fontWeight: "bold",
-                      height: "50px",
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    Счет
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, rowIndex) => (
-                  <tr
-                    key={rowIndex}
-                    style={{
-                      backgroundColor: rowIndex % 2 === 0 ? "white" : "#f9f9f9",
-                    }}
-                  >
-                    <td
+              <p style={{ margin: 0 }}>Счет</p>
+              <select
+                style={{
+                  height: "30px",
+                  width: "500px",
+                  borderRadius: "5px",
+                  marginRight: "350px",
+                }}
+                id="acct"
+                value={["1", "2", "3"]}
+                // onChange={handleCfoChange}
+              >
+                <option value="">Выберите acct</option>
+                {["1", "2", "3"].map((acct, index) => (
+                  <option key={index} value={acct}>
+                    {acct}
+                  </option>
+                ))}
+              </select>
+              <button
+                className={classes.buttonClick}
+                style={{
+                  backgroundColor: "blue",
+                  color: "white",
+                  display: "flex",
+                  justifyContent: "center",
+                  alignItems: "center",
+                  textAlign: "center",
+                  height: "33px",
+                  width: "250px",
+                }}
+              >
+                Добавить счет
+              </button>
+            </div>
+            <div
+              style={{
+                borderBottom: "1px solid rgba(118, 118, 118, 0.48)",
+                height: "1px",
+                width: "100%",
+              }}
+            ></div>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "row",
+                justifyContent: "space-between",
+                marginBottom: "10px",
+                width: "100%",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                }}
+              >
+                <input
+                  placeholder="Поиск счета"
+                  style={{ height: "25px", width: "250px" }}
+                />
+                <button
+                  className={classes.buttonClick}
+                  style={{
+                    display: "flex",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    height: "30px",
+                    width: "30px",
+                    padding: "0px",
+                    borderColor: "black",
+                  }}
+                >
+                  🔍
+                </button>
+              </div>
+              <div>
+                <button
+                  className={classes.buttonClick}
+                  style={{
+                    display: "flex",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    width: "150px",
+                    height: "30px",
+                    fontSize: "13px",
+                    borderColor: "black",
+                  }}
+                  onClick={saveAllChanges}
+                  disabled={Object.keys(editedRows).length === 0}
+                  // disabled={!hasRowChanges(rowIndex)}
+                >
+                  Сохранить все 💾
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", width: "98%" }}>
+            {/* Фиксированная первая колонка (Счет) */}
+            <div
+              style={{
+                display: rows.length === 0 ? "none" : "",
+                position: "sticky",
+                left: 0,
+                zIndex: 2,
+                // backgroundColor: "#e3eff4",
+              }}
+            >
+              <table
+                style={{
+                  borderCollapse: "collapse",
+                  height: "450px",
+                  width: "300px",
+                }}
+              >
+                <thead>
+                  <tr>
+                    <th
                       style={{
-                        textAlign: "start",
+                        // Уменьшенный padding
+                        textAlign: "center",
                         border: "1px solid black",
-                        backgroundColor: "rgba(248, 235, 117, 0.48)",
+                        backgroundColor: "#f9f9f9",
+                        fontWeight: "bold",
+                        height: "50px",
                         whiteSpace: "nowrap",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
-                        maxWidth: "20px",
                       }}
-                      title={row.acc_desc}
                     >
-                      {row.acc_desc}
-                    </td>
+                      Счет
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {rows.map((row, rowIndex) => (
+                    <tr
+                      key={rowIndex}
+                      style={{
+                        backgroundColor:
+                          rowIndex % 2 === 0 ? "white" : "#f9f9f9",
+                      }}
+                    >
+                      <td
+                        style={{
+                          textAlign: "start",
+                          border: "1px solid black",
+                          backgroundColor: "rgba(248, 235, 117, 0.48)",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          maxWidth: "20px",
+                        }}
+                        title={row.acc_desc}
+                      >
+                        {row.acc_desc}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
-          {/* Прокручиваемая центральная часть */}
-          <div
-            style={{
-              overflowX: "auto",
-              display: rows.length === 0 ? "none" : "",
-            }}
-          >
-            <table
+            {/* Прокручиваемая центральная часть */}
+            <div
               style={{
-                borderCollapse: "collapse",
+                overflowX: "auto",
+                display: rows.length === 0 ? "none" : "",
               }}
             >
-              <thead>
-                <tr>
-                  {getVisibleColumns().map((col) => (
-                    <th
-                      key={col}
+              <table
+                style={{
+                  borderCollapse: "collapse",
+                  height: "450px",
+                }}
+              >
+                <thead>
+                  <tr>
+                    {getVisibleColumns().map((col) => (
+                      <th
+                        key={col}
+                        style={{
+                          height: "50px",
+                          minWidth: "80px",
+                          border: "1px solid black",
+                          backgroundColor: "#f5f5f5",
+                          fontWeight: "bold",
+                        }}
+                      >
+                        {formatColumnHeader(col)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row, rowIndex) => (
+                    <tr
+                      key={rowIndex}
                       style={{
-                        height: "50px",
-                        minWidth: "80px",
+                        backgroundColor:
+                          rowIndex % 2 === 0 ? "white" : "#f9f9f9",
+                      }}
+                    >
+                      {getVisibleColumns().map((col) => {
+                        const editable = isEditable(col);
+                        const cellData = editedRows[rowIndex]?.[col];
+                        const originalValue = row[col];
+                        const displayValue = cellData
+                          ? cellData.newValue
+                          : formatNumberValue(originalValue ?? "");
+                        const isChanged = cellData
+                          ? !valuesAreEqual(
+                              cellData.newValue,
+                              cellData.originalValue
+                            )
+                          : false;
+                        return (
+                          <td
+                            key={col}
+                            className={isChanged ? classes.changedCell : ""}
+                            style={{
+                              textAlign: "center",
+                              // padding: "8px",
+                              border: "1px solid black",
+                              backgroundColor: !editable
+                                ? "rgba(130, 126, 126, 0.48)"
+                                : "white",
+                              position: "relative", // Важно для позиционирования уголка
+                            }}
+                          >
+                            {editable ? (
+                              <input
+                                style={{
+                                  width: "80px",
+                                  height: "30px",
+                                  textAlign: "end",
+                                  border: "none",
+                                }}
+                                type="text"
+                                value={displayValue}
+                                onChange={(e) =>
+                                  handleCellChange(
+                                    rowIndex,
+                                    col,
+                                    e.target.value
+                                  )
+                                }
+                                onBlur={(e) => {
+                                  handleCellBlur(rowIndex, col, e.target.value);
+                                }}
+                                onFocus={(e) => {
+                                  const rawValue =
+                                    cellData?.newValue ?? row[col];
+                                  e.target.value =
+                                    rawValue !== null && rawValue !== undefined
+                                      ? String(rawValue)
+                                          .replace(/\s/g, "")
+                                          .replace(/,/g, ".")
+                                      : "";
+                                  e.target.select();
+                                }}
+                              />
+                            ) : (
+                              <div
+                                style={{
+                                  display: "flex",
+                                  justifyContent: "end",
+                                  width: "80px",
+                                  fontSize: "14px",
+                                }}
+                              >
+                                {formatNumberValue(displayValue)}
+                              </div>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Фиксированная последняя колонка (кнопка) */}
+            <div
+              style={{
+                display: rows.length === 0 ? "none" : "",
+                position: "sticky",
+                right: 0,
+                zIndex: 2,
+                // backgroundColor: "#e3eff4",
+              }}
+            >
+              <table
+                style={{
+                  borderCollapse: "collapse",
+                  height: "450px",
+                  width: "100px",
+                }}
+              >
+                <thead>
+                  <tr>
+                    <th
+                      style={{
+                        // padding: "8px",
+                        textAlign: "center",
                         border: "1px solid black",
                         backgroundColor: "#f5f5f5",
                         fontWeight: "bold",
+                        height: "50px",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
                       }}
                     >
-                      {formatColumnHeader(col)}
+                      Сохранить
                     </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, rowIndex) => (
-                  <tr
-                    key={rowIndex}
-                    style={{
-                      backgroundColor: rowIndex % 2 === 0 ? "white" : "#f9f9f9",
-                    }}
-                  >
-                    {getVisibleColumns().map((col) => {
-                      const editable = isEditable(col);
-                      const cellData = editedRows[rowIndex]?.[col];
-                      const originalValue = row[col];
-                      const displayValue = cellData
-                        ? cellData.newValue
-                        : formatNumberValue(originalValue ?? "");
-                      const isChanged = cellData
-                        ? !valuesAreEqual(
-                            cellData.newValue,
-                            cellData.originalValue
-                          )
-                        : false;
-                      return (
-                        <td
-                          key={col}
-                          className={isChanged ? classes.changedCell : ""}
-                          style={{
-                            textAlign: "center",
-                            padding: "8px",
-                            border: "1px solid black",
-                            backgroundColor: !editable
-                              ? "rgba(130, 126, 126, 0.48)"
-                              : "white",
-                            position: "relative", // Важно для позиционирования уголка
-                          }}
-                        >
-                          {editable ? (
-                            <input
-                              style={{
-                                width: "80px",
-                                height: "30px",
-                                textAlign: "end",
-                                border: "none",
-                              }}
-                              type="text"
-                              value={displayValue}
-                              onChange={(e) =>
-                                handleCellChange(rowIndex, col, e.target.value)
-                              }
-                              onBlur={(e) => {
-                                handleCellBlur(rowIndex, col, e.target.value);
-                              }}
-                              onFocus={(e) => {
-                                const rawValue = cellData?.newValue ?? row[col];
-                                e.target.value =
-                                  rawValue !== null && rawValue !== undefined
-                                    ? String(rawValue)
-                                        .replace(/\s/g, "")
-                                        .replace(/,/g, ".")
-                                    : "";
-                                e.target.select();
-                              }}
-                            />
-                          ) : (
-                            <div
-                              style={{
-                                display: "flex",
-                                justifyContent: "end",
-                                width: "80px",
-                                fontSize: "14px",
-                              }}
-                            >
-                              {formatNumberValue(displayValue)}
-                            </div>
-                          )}
-                        </td>
-                      );
-                    })}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Фиксированная последняя колонка (кнопка) */}
-          <div
-            style={{
-              display: rows.length === 0 ? "none" : "",
-              position: "sticky",
-              right: 0,
-              zIndex: 2,
-              backgroundColor: "#e3eff4",
-            }}
-          >
-            <table
-              style={{
-                borderCollapse: "collapse",
-                height: "542px",
-                width: "100px",
-              }}
-            >
-              <thead>
-                <tr>
-                  <th
-                    style={{
-                      // padding: "8px",
-                      textAlign: "center",
-                      border: "1px solid black",
-                      backgroundColor: "#f5f5f5",
-                      fontWeight: "bold",
-                      height: "50px",
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    Сохранить
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, rowIndex) => (
-                  <tr
-                    key={rowIndex}
-                    style={{
-                      backgroundColor: rowIndex % 2 === 0 ? "white" : "#f9f9f9",
-                    }}
-                  >
-                    <td
+                </thead>
+                <tbody>
+                  {rows.map((row, rowIndex) => (
+                    <tr
+                      key={rowIndex}
                       style={{
-                        padding: "8px",
-                        textAlign: "center",
-                        border: "1px solid black",
-                        width: "40px",
+                        backgroundColor:
+                          rowIndex % 2 === 0 ? "white" : "#f9f9f9",
                       }}
                     >
-                      <button
+                      <td
                         style={{
-                          border: "1px solid #ccc",
-                          background: "white",
-                          cursor: hasRowChanges(rowIndex)
-                            ? "pointer"
-                            : "not-allowed",
-                          padding: "2px 5px",
-                          borderRadius: "3px",
-                          opacity: hasRowChanges(rowIndex) ? 1 : 0.5,
+                          // padding: "8px",
+                          textAlign: "center",
+                          border: "1px solid black",
+                          width: "40px",
                         }}
-                        onClick={() =>
-                          hasRowChanges(rowIndex) && saveChanges(rowIndex)
-                        }
-                        disabled={!hasRowChanges(rowIndex)}
                       >
-                        💾
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                        <button
+                          style={{
+                            border: "1px solid #ccc",
+                            background: "white",
+                            cursor: hasRowChanges(rowIndex)
+                              ? "pointer"
+                              : "not-allowed",
+                            padding: "2px 5px",
+                            borderRadius: "3px",
+                            opacity: hasRowChanges(rowIndex) ? 1 : 0.5,
+                          }}
+                          onClick={() =>
+                            hasRowChanges(rowIndex) && saveChanges(rowIndex)
+                          }
+                          disabled={!hasRowChanges(rowIndex)}
+                        >
+                          💾
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
