@@ -140,6 +140,23 @@ app.get("/cfo", (req, res) => {
   );
 });
 
+app.get("/acct", async (req, res) => {
+  const { time_year, sce_id, cfo_id } = req.query;
+
+  if (!time_year || !sce_id || !cfo_id) {
+    return res.status(400).send("Укажите параметры time_year, sce_id и cfo_id");
+  }
+
+  try {
+    const query = `SELECT * FROM dim_app.v_dim_acc WHERE is_root IS FALSE AND description NOT IN (SELECT acc_desc FROM data_mart.v_plan WHERE time_year = $1 AND sce_id = $2 AND cfo_id = $3)`;
+    const result = await client.query(query, [time_year, sce_id, cfo_id]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Ошибка сервера");
+  }
+});
+
 app.get("/data", async (req, res) => {
   const { time_year, sce_id, cfo_id } = req.query;
 

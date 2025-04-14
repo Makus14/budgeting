@@ -59,6 +59,11 @@ interface Cfo {
   id: string;
 }
 
+interface Acct {
+  description: string;
+  id: string;
+}
+
 interface Row {
   p_id?: number;
   acc_desc?: string;
@@ -86,6 +91,9 @@ function Table() {
   const [years, setYears] = useState<Year[]>([]);
   const [sce, setSce] = useState<Sce[]>([]);
   const [cfo, setCfo] = useState<Cfo[]>([]);
+
+  const [acct, setAcct] = useState<Acct[]>([]);
+
   const [rows, setRows] = useState<Row[]>([]);
   const [editedRows, setEditedRows] = useState<EditedRows>({});
   const [changedCells, setChangedCells] = useState<ChangedCells>({});
@@ -93,8 +101,13 @@ function Table() {
   const [selectedYear, setSelectedYear] = useState<string>("");
   const [selectedSce, setSelectedSce] = useState<string>("");
   const [selectedCfo, setSelectedCfo] = useState<string>("");
+
+  const [selectedAcct, setSelectedAcct] = useState<string>("");
+
   const [selectedIdSce, setSelectedIdSce] = useState<string>("");
   const [selectedIdCfo, setSelectedIdCfo] = useState<string>("");
+
+  const [selectedIdAcct, setSelectedIdAcct] = useState<string>("");
 
   useEffect(() => {
     fetch("http://localhost:3000/years")
@@ -124,6 +137,15 @@ function Table() {
         setRows(data);
       })
       .catch((err) => console.error("Ошибка загрузки данных:", err));
+  };
+
+  const fetchAcctData = () => {
+    fetch(
+      `http://localhost:3000/acct?time_year=${selectedYear}&sce_id=${selectedIdSce}&cfo_id=${selectedIdCfo}`
+    )
+      .then((response) => response.json())
+      .then((data) => setAcct(data))
+      .catch((error) => console.error("Error fetching acct:", error));
   };
 
   const handleCellChange = (
@@ -322,6 +344,15 @@ function Table() {
     const selectedOption = cfo.find((cfo) => cfo.code === selectedCode);
     setSelectedCfo(selectedCode);
     setSelectedIdCfo(selectedOption ? selectedOption.id : "");
+  };
+
+  const handleAcctChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const selectedAcct = event.target.value;
+    const selectedOption = acct.find(
+      (acct) => acct.description === selectedAcct
+    );
+    setSelectedAcct(selectedAcct);
+    setSelectedIdAcct(selectedOption ? selectedOption.id : "");
   };
 
   const getVisibleColumns = () => {
@@ -637,7 +668,10 @@ function Table() {
             fontWeight: "bold",
             fontSize: "14px",
           }}
-          onClick={fetchTableData}
+          onClick={() => {
+            fetchTableData();
+            fetchAcctData();
+          }}
         >
           Загрузить данные
         </button>
@@ -695,6 +729,7 @@ function Table() {
               }}
             >
               <p style={{ margin: 0 }}>Счет</p>
+
               <select
                 style={{
                   height: "30px",
@@ -703,16 +738,17 @@ function Table() {
                   marginRight: "350px",
                 }}
                 id="acct"
-                value={["1", "2", "3"]}
-                // onChange={handleCfoChange}
+                value={selectedAcct}
+                onChange={handleAcctChange}
               >
-                <option value="">Выберите acct</option>
-                {["1", "2", "3"].map((acct, index) => (
-                  <option key={index} value={acct}>
-                    {acct}
+                <option value="">Выберите счёт</option>
+                {acct.map((acct, index) => (
+                  <option key={index} value={acct.description}>
+                    {acct.description}
                   </option>
                 ))}
               </select>
+
               <button
                 className={classes.buttonClick}
                 style={{
