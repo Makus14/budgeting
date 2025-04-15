@@ -320,6 +320,28 @@ app.post("/update-all", async (req, res) => {
   }
 });
 
+app.post("/addAcct", async (req, res) => {
+  const { time_year, sce_id, cfo_id, acc_id } = req.body;
+
+  if (!time_year || !sce_id || !cfo_id || !acc_id) {
+    return res
+      .status(400)
+      .send("Необходимо указать time_year, sce_id, cfo_id и acc_id");
+  }
+
+  try {
+    const insertQuery = `
+      INSERT INTO data_mart.plan (time_year, sce_id, cfo_id, acc_id, is_active)
+      VALUES ($1, $2, $3, $4, true)
+    `;
+    await client.query(insertQuery, [time_year, sce_id, cfo_id, acc_id]);
+    res.status(201).send("Запись успешно добавлена");
+  } catch (err) {
+    console.error("Ошибка при вставке:", err);
+    res.status(500).send("Ошибка сервера при вставке");
+  }
+});
+
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
 });

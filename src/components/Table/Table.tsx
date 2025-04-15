@@ -67,6 +67,7 @@ interface Acct {
 interface Row {
   p_id?: number;
   acc_desc?: string;
+  id?: string;
   [key: string]: string | number | null | undefined;
 }
 
@@ -109,6 +110,10 @@ function Table() {
 
   const [selectedIdAcct, setSelectedIdAcct] = useState<string>("");
 
+  const [lastAddedRowIndex, setLastAddedRowIndex] = useState<number | null>(
+    null
+  );
+
   useEffect(() => {
     fetch("http://localhost:3000/years")
       .then((response) => response.json())
@@ -128,15 +133,25 @@ function Table() {
       .catch((error) => console.error("Error fetching cfo:", error));
   }, []);
 
-  const fetchTableData = () => {
-    fetch(
-      `http://localhost:3000/data?time_year=${selectedYear}&sce_id=${selectedIdSce}&cfo_id=${selectedIdCfo}`
-    )
-      .then((res) => res.json())
-      .then((data) => {
-        setRows(data);
-      })
-      .catch((err) => console.error("Ошибка загрузки данных:", err));
+  useEffect(() => {
+    if (lastAddedRowIndex !== null) {
+      const timer = setTimeout(() => setLastAddedRowIndex(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [lastAddedRowIndex]);
+
+  const fetchTableData = async () => {
+    try {
+      const res = await fetch(
+        `http://localhost:3000/data?time_year=${selectedYear}&sce_id=${selectedIdSce}&cfo_id=${selectedIdCfo}`
+      );
+      const data = await res.json();
+      setRows(data);
+      return data;
+    } catch (err) {
+      console.error("Ошибка загрузки данных:", err);
+      throw err;
+    }
   };
 
   const fetchAcctData = () => {
@@ -146,6 +161,56 @@ function Table() {
       .then((response) => response.json())
       .then((data) => setAcct(data))
       .catch((error) => console.error("Error fetching acct:", error));
+  };
+
+  const addAcctToTable = async () => {
+    try {
+      // 1. Отправляем запрос на добавление
+      const response = await fetch("http://localhost:3000/addAcct", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          time_year: selectedYear,
+          sce_id: selectedIdSce,
+          cfo_id: selectedIdCfo,
+          acc_id: selectedIdAcct,
+        }),
+      });
+
+      if (!response.ok) throw new Error("Ошибка при добавлении");
+      await response.text();
+
+      // 2. Обновляем данные (параллельно)
+      const [updatedAcct, updatedRows] = await Promise.all([
+        fetchAcctData(), // Обновляем список счетов
+        fetchTableData(), // Обновляем таблицу
+      ]);
+
+      // 3. Сбрасываем выбранное значение
+      setSelectedAcct("");
+      setSelectedIdAcct("");
+
+      // 4. Подсветка и скролл
+      const newIndex = updatedRows.length - 1;
+      setLastAddedRowIndex(newIndex);
+
+      setTimeout(() => {
+        const rowElement = document.querySelector(
+          `tr[data-row-index="${newIndex}"]`
+        );
+        if (rowElement) {
+          const scrollPosition =
+            rowElement.getBoundingClientRect().top + window.pageYOffset - 100;
+          window.scrollTo({ top: scrollPosition, behavior: "smooth" });
+        }
+      }, 200);
+
+      setTimeout(() => setLastAddedRowIndex(null), 3000);
+    } catch (error) {
+      console.error("Ошибка добавления:", error);
+    }
   };
 
   const handleCellChange = (
@@ -167,7 +232,6 @@ function Table() {
         },
       }));
 
-      // Помечаем как изменённое только если значение действительно изменилось
       setChangedCells((prev) => ({
         ...prev,
         [rowIndex]: {
@@ -184,7 +248,6 @@ function Table() {
       return;
     }
 
-    // Подготовка данных для отправки
     const editedFields = Object.fromEntries(
       Object.entries(editedRows[rowIndex])
         .filter(
@@ -221,9 +284,7 @@ function Table() {
         }),
       });
 
-      // Проверяем успешность запроса, но не пытаемся парсить ответ как JSON
       if (response.ok) {
-        // Удаляем сохраненные изменения из состояний
         setEditedRows((prev) => {
           const newEditedRows = { ...prev };
           delete newEditedRows[rowIndex];
@@ -236,7 +297,6 @@ function Table() {
           return newChangedCells;
         });
 
-        // Обновляем данные таблицы
         fetchTableData();
 
         console.log("Данные успешно сохранены");
@@ -314,11 +374,9 @@ function Table() {
         throw new Error(error.message || "Ошибка сервера");
       }
 
-      // Очищаем состояния
       setEditedRows({});
       setChangedCells({});
 
-      // Обновляем данные
       await fetchTableData();
 
       alert("Все изменения успешно сохранены");
@@ -492,7 +550,6 @@ function Table() {
     newValue: string,
     originalValue: string | number | null | undefined
   ): boolean => {
-    // Оба значения пустые
     if (
       newValue.trim() === "" &&
       (originalValue === null ||
@@ -552,7 +609,6 @@ function Table() {
           marginTop: "10px",
           marginBottom: "20px",
           backgroundColor: "white",
-          // border: "1px solid black",
           borderRadius: "10px",
           boxShadow: "0px 0px 10px 5px rgb(0, 0, 0, 0.2)",
         }}
@@ -685,7 +741,6 @@ function Table() {
           position: "relative",
           justifyContent: "center",
           marginBottom: "30px",
-          // border: "1px solid black",
         }}
       >
         {/* Основная таблица с фиксированными колонками */}
@@ -694,13 +749,12 @@ function Table() {
             {
               display: "flex",
               flexDirection: "column",
-              // width: "100%",
               alignItems: "center",
               margin: "20px",
               backgroundColor: "white",
               borderRadius: "10px",
               boxShadow: "0px 0px 10px 5px rgb(0, 0, 0, 0.2)",
-              overflowX: "auto", // Разрешаем скролл для всей таблицы
+              overflowX: "auto",
               scrollbarWidth: "none", // Скрываем скроллбар для Firefox
               msOverflowStyle: "none", // Скрываем скроллбар для IE
               "&::-webkit-scrollbar": { display: "none" }, // Скрываем скроллбар для Chrome/Safari
@@ -761,6 +815,7 @@ function Table() {
                   height: "33px",
                   width: "250px",
                 }}
+                onClick={addAcctToTable}
               >
                 Добавить счет
               </button>
@@ -821,7 +876,6 @@ function Table() {
                   }}
                   onClick={saveAllChanges}
                   disabled={Object.keys(editedRows).length === 0}
-                  // disabled={!hasRowChanges(rowIndex)}
                 >
                   Сохранить все 💾
                 </button>
@@ -837,13 +891,11 @@ function Table() {
                 position: "sticky",
                 left: 0,
                 zIndex: 2,
-                // backgroundColor: "#e3eff4",
               }}
             >
               <table
                 style={{
                   borderCollapse: "collapse",
-                  height: "450px",
                   width: "300px",
                 }}
               >
@@ -851,7 +903,6 @@ function Table() {
                   <tr>
                     <th
                       style={{
-                        // Уменьшенный padding
                         textAlign: "center",
                         border: "1px solid black",
                         backgroundColor: "#f9f9f9",
@@ -867,30 +918,38 @@ function Table() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((row, rowIndex) => (
-                    <tr
-                      key={rowIndex}
-                      style={{
-                        backgroundColor:
-                          rowIndex % 2 === 0 ? "white" : "#f9f9f9",
-                      }}
-                    >
-                      <td
+                  {rows.map((row, rowIndex) => {
+                    return (
+                      <tr
+                        key={rowIndex}
+                        data-row-index={rowIndex}
                         style={{
-                          textAlign: "start",
-                          border: "1px solid black",
-                          backgroundColor: "rgba(248, 235, 117, 0.48)",
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          maxWidth: "20px",
+                          backgroundColor:
+                            rowIndex % 2 === 0 ? "white" : "#f9f9f9",
+                          ...(rowIndex === lastAddedRowIndex && {
+                            backgroundColor: "rgba(144, 238, 144, 0.5)",
+                            transition: "background-color 0.5s ease",
+                          }),
                         }}
-                        title={row.acc_desc}
                       >
-                        {row.acc_desc}
-                      </td>
-                    </tr>
-                  ))}
+                        <td
+                          style={{
+                            textAlign: "start",
+                            border: "1px solid black",
+                            backgroundColor: "rgba(248, 235, 117, 0.48)",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            maxWidth: "20px",
+                            height: "32px",
+                          }}
+                          title={row.acc_desc}
+                        >
+                          {row.acc_desc}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -905,7 +964,6 @@ function Table() {
               <table
                 style={{
                   borderCollapse: "collapse",
-                  height: "450px",
                 }}
               >
                 <thead>
@@ -954,11 +1012,14 @@ function Table() {
                             className={isChanged ? classes.changedCell : ""}
                             style={{
                               textAlign: "center",
-                              // padding: "8px",
                               border: "1px solid black",
                               backgroundColor: !editable
                                 ? "rgba(130, 126, 126, 0.48)"
                                 : "white",
+                              ...(rowIndex === lastAddedRowIndex && {
+                                backgroundColor: "rgba(144, 238, 144, 0.5)",
+                                transition: "background-color 0.5s ease",
+                              }),
                               position: "relative", // Важно для позиционирования уголка
                             }}
                           >
@@ -969,6 +1030,10 @@ function Table() {
                                   height: "30px",
                                   textAlign: "end",
                                   border: "none",
+                                  ...(rowIndex === lastAddedRowIndex && {
+                                    backgroundColor: "rgba(144, 238, 144, 0.5)",
+                                    transition: "background-color 0.5s ease",
+                                  }),
                                 }}
                                 type="text"
                                 value={displayValue}
@@ -1022,13 +1087,11 @@ function Table() {
                 position: "sticky",
                 right: 0,
                 zIndex: 2,
-                // backgroundColor: "#e3eff4",
               }}
             >
               <table
                 style={{
                   borderCollapse: "collapse",
-                  height: "450px",
                   width: "100px",
                 }}
               >
@@ -1036,7 +1099,6 @@ function Table() {
                   <tr>
                     <th
                       style={{
-                        // padding: "8px",
                         textAlign: "center",
                         border: "1px solid black",
                         backgroundColor: "#f5f5f5",
@@ -1058,14 +1120,18 @@ function Table() {
                       style={{
                         backgroundColor:
                           rowIndex % 2 === 0 ? "white" : "#f9f9f9",
+                        ...(rowIndex === lastAddedRowIndex && {
+                          backgroundColor: "rgba(144, 238, 144, 0.5)",
+                          transition: "background-color 0.5s ease",
+                        }),
                       }}
                     >
                       <td
                         style={{
-                          // padding: "8px",
                           textAlign: "center",
                           border: "1px solid black",
                           width: "40px",
+                          height: "32px",
                         }}
                       >
                         <button
