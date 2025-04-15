@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 
 import { Pagination } from "antd";
+import classes from "./Table.module.css";
 
 const fixedColumns = [
   "y0_m01",
@@ -58,15 +59,32 @@ interface Cfo {
   id: string;
 }
 
+interface Acct {
+  description: string;
+  id: string;
+}
+
 interface Row {
   p_id?: number;
   acc_desc?: string;
+  id?: string;
   [key: string]: string | number | null | undefined;
+}
+
+interface EditedCellValue {
+  newValue: string;
+  originalValue: string | number | null | undefined;
 }
 
 interface EditedRows {
   [rowIndex: number]: {
-    [column: string]: string; // Только строки, без null
+    [column: string]: EditedCellValue;
+  };
+}
+
+interface ChangedCells {
+  [rowIndex: number]: {
+    [column: string]: boolean;
   };
 }
 
@@ -74,14 +92,27 @@ function Table() {
   const [years, setYears] = useState<Year[]>([]);
   const [sce, setSce] = useState<Sce[]>([]);
   const [cfo, setCfo] = useState<Cfo[]>([]);
+
+  const [acct, setAcct] = useState<Acct[]>([]);
+
   const [rows, setRows] = useState<Row[]>([]);
   const [editedRows, setEditedRows] = useState<EditedRows>({});
+  const [changedCells, setChangedCells] = useState<ChangedCells>({});
 
   const [selectedYear, setSelectedYear] = useState<string>("");
   const [selectedSce, setSelectedSce] = useState<string>("");
   const [selectedCfo, setSelectedCfo] = useState<string>("");
+
+  const [selectedAcct, setSelectedAcct] = useState<string>("");
+
   const [selectedIdSce, setSelectedIdSce] = useState<string>("");
   const [selectedIdCfo, setSelectedIdCfo] = useState<string>("");
+
+  const [selectedIdAcct, setSelectedIdAcct] = useState<string>("");
+
+  const [lastAddedRowIndex, setLastAddedRowIndex] = useState<number | null>(
+    null
+  );
 
   useEffect(() => {
     fetch("http://localhost:3000/years")
@@ -102,15 +133,84 @@ function Table() {
       .catch((error) => console.error("Error fetching cfo:", error));
   }, []);
 
-  const fetchTableData = () => {
+  useEffect(() => {
+    if (lastAddedRowIndex !== null) {
+      const timer = setTimeout(() => setLastAddedRowIndex(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [lastAddedRowIndex]);
+
+  const fetchTableData = async () => {
+    try {
+      const res = await fetch(
+        `http://localhost:3000/data?time_year=${selectedYear}&sce_id=${selectedIdSce}&cfo_id=${selectedIdCfo}`
+      );
+      const data = await res.json();
+      setRows(data);
+      return data;
+    } catch (err) {
+      console.error("Ошибка загрузки данных:", err);
+      throw err;
+    }
+  };
+
+  const fetchAcctData = () => {
     fetch(
-      `http://localhost:3000/data?time_year=${selectedYear}&sce_id=${selectedIdSce}&cfo_id=${selectedIdCfo}`
+      `http://localhost:3000/acct?time_year=${selectedYear}&sce_id=${selectedIdSce}&cfo_id=${selectedIdCfo}`
     )
-      .then((res) => res.json())
-      .then((data) => {
-        setRows(data);
-      })
-      .catch((err) => console.error("Ошибка загрузки данных:", err));
+      .then((response) => response.json())
+      .then((data) => setAcct(data))
+      .catch((error) => console.error("Error fetching acct:", error));
+  };
+
+  const addAcctToTable = async () => {
+    try {
+      // 1. Отправляем запрос на добавление
+      const response = await fetch("http://localhost:3000/addAcct", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          time_year: selectedYear,
+          sce_id: selectedIdSce,
+          cfo_id: selectedIdCfo,
+          acc_id: selectedIdAcct,
+        }),
+      });
+
+      if (!response.ok) throw new Error("Ошибка при добавлении");
+      await response.text();
+
+      // 2. Обновляем данные (параллельно)
+      const [updatedAcct, updatedRows] = await Promise.all([
+        fetchAcctData(), // Обновляем список счетов
+        fetchTableData(), // Обновляем таблицу
+      ]);
+
+      // 3. Сбрасываем выбранное значение
+      setSelectedAcct("");
+      setSelectedIdAcct("");
+
+      // 4. Подсветка и скролл
+      const newIndex = updatedRows.length - 1;
+      setLastAddedRowIndex(newIndex);
+
+      setTimeout(() => {
+        const rowElement = document.querySelector(
+          `tr[data-row-index="${newIndex}"]`
+        );
+        if (rowElement) {
+          const scrollPosition =
+            rowElement.getBoundingClientRect().top + window.pageYOffset - 100;
+          window.scrollTo({ top: scrollPosition, behavior: "smooth" });
+        }
+      }, 200);
+
+      setTimeout(() => setLastAddedRowIndex(null), 3000);
+    } catch (error) {
+      console.error("Ошибка добавления:", error);
+    }
   };
 
   const handleCellChange = (
@@ -119,27 +219,52 @@ function Table() {
     value: string
   ) => {
     if (value === "" || /^-?\d*[,.]?\d*$/.test(value)) {
+      const originalValue = rows[rowIndex][column];
+
       setEditedRows((prev) => ({
         ...prev,
         [rowIndex]: {
           ...prev[rowIndex],
-          [column]: value, // Сохраняем "как есть" для редактирования
+          [column]: {
+            newValue: value,
+            originalValue: originalValue,
+          },
+        },
+      }));
+
+      setChangedCells((prev) => ({
+        ...prev,
+        [rowIndex]: {
+          ...prev[rowIndex],
+          [column]: !valuesAreEqual(value, originalValue),
         },
       }));
     }
   };
 
   const saveChanges = async (rowIndex: number) => {
-    if (!editedRows[rowIndex]) return;
+    if (!editedRows[rowIndex]) {
+      console.log("Нет изменений для сохранения");
+      return;
+    }
 
     const editedFields = Object.fromEntries(
-      Object.entries(editedRows[rowIndex]).map(([key, value]) => [
-        key,
-        value === null || value === ""
-          ? null
-          : Number(value.replace(/\s/g, "").replace(/,/g, ".")),
-      ])
+      Object.entries(editedRows[rowIndex])
+        .filter(
+          ([col, data]) => !valuesAreEqual(data.newValue, data.originalValue)
+        )
+        .map(([col, data]) => [
+          col,
+          data.newValue.trim() === ""
+            ? null
+            : Number(data.newValue.replace(/\s/g, "").replace(/,/g, ".")),
+        ])
     );
+
+    if (Object.keys(editedFields).length === 0) {
+      console.log("Нет реальных изменений для сохранения");
+      return;
+    }
 
     try {
       const response = await fetch("http://localhost:3000/update", {
@@ -149,7 +274,6 @@ function Table() {
           p_id: rows[rowIndex].p_id,
           editedFields: {
             ...editedFields,
-            // Явно преобразуем все значения
             ...Object.fromEntries(
               Object.entries(editedFields).map(([k, v]) => [
                 k,
@@ -159,9 +283,106 @@ function Table() {
           },
         }),
       });
-      // ... остальная логика
+
+      if (response.ok) {
+        setEditedRows((prev) => {
+          const newEditedRows = { ...prev };
+          delete newEditedRows[rowIndex];
+          return newEditedRows;
+        });
+
+        setChangedCells((prev) => {
+          const newChangedCells = { ...prev };
+          delete newChangedCells[rowIndex];
+          return newChangedCells;
+        });
+
+        fetchTableData();
+
+        console.log("Данные успешно сохранены");
+      } else {
+        console.error("Ошибка сервера:", await response.text());
+      }
+    } catch (error) {
+      console.error("Ошибка при сохранении:", error);
+    }
+  };
+
+  const saveAllChanges = async () => {
+    // Собираем все изменения из editedRows с явной типизацией
+    const changesToSave = Object.entries(editedRows)
+      .map(
+        ([rowIndex, rowChanges]): {
+          p_id: number | undefined;
+          editedFields: Record<string, string | number | null>;
+        } => {
+          const rowId = rows[Number(rowIndex)]?.p_id;
+
+          // Явно типизируем entries
+          const changesEntries = Object.entries(rowChanges) as Array<
+            [string, EditedCellValue]
+          >;
+
+          // Фильтруем и преобразуем изменения
+          const editedFields = Object.fromEntries(
+            changesEntries
+              .filter(
+                ([_, cellData]) =>
+                  !valuesAreEqual(cellData.newValue, cellData.originalValue)
+              )
+              .map(([column, cellData]) => [
+                column,
+                cellData.newValue.trim() === ""
+                  ? null
+                  : Number(
+                      cellData.newValue.replace(/\s/g, "").replace(/,/g, ".")
+                    ),
+              ])
+          );
+
+          return {
+            p_id: rowId,
+            editedFields,
+          };
+        }
+      )
+      .filter(
+        (
+          change
+        ): change is {
+          p_id: number;
+          editedFields: Record<string, string | number | null>;
+        } =>
+          change.p_id !== undefined &&
+          Object.keys(change.editedFields).length > 0
+      );
+
+    if (changesToSave.length === 0) {
+      alert("Нет изменений для сохранения");
+      return;
+    }
+
+    try {
+      const response = await fetch("http://localhost:3000/update-all", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ changes: changesToSave }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || "Ошибка сервера");
+      }
+
+      setEditedRows({});
+      setChangedCells({});
+
+      await fetchTableData();
+
+      alert("Все изменения успешно сохранены");
     } catch (error) {
       console.error("Ошибка сохранения:", error);
+      alert(error instanceof Error ? error.message : "Ошибка при сохранении");
     }
   };
 
@@ -181,6 +402,15 @@ function Table() {
     const selectedOption = cfo.find((cfo) => cfo.code === selectedCode);
     setSelectedCfo(selectedCode);
     setSelectedIdCfo(selectedOption ? selectedOption.id : "");
+  };
+
+  const handleAcctChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const selectedAcct = event.target.value;
+    const selectedOption = acct.find(
+      (acct) => acct.description === selectedAcct
+    );
+    setSelectedAcct(selectedAcct);
+    setSelectedIdAcct(selectedOption ? selectedOption.id : "");
   };
 
   const getVisibleColumns = () => {
@@ -240,49 +470,114 @@ function Table() {
         }).format(num);
   };
 
-  // const parseInputValue = (value: string | null): string | null => {
-  //   if (value === null || value === "") return null;
-  //   return value.replace(/\s/g, "").replace(/,/g, ".");
-  // };
-
-  // const handleCellBlur = (rowIndex: number, column: string, value: string) => {
-  //   const formatted = formatNumberValue(value);
-  //   setEditedRows((prev) => ({
-  //     ...prev,
-  //     [rowIndex]: {
-  //       ...prev[rowIndex],
-  //       [column]: formatted, // Сохраняем уже отформатированное значение
-  //     },
-  //   }));
-  // };
-
   const handleCellBlur = (rowIndex: number, column: string, value: string) => {
-    // Если поле пустое — восстанавливаем значение из исходных данных (rows)
+    const originalValue = rows[rowIndex][column];
+
+    // Если поле пустое - восстанавливаем оригинальное значение
     if (value.trim() === "") {
       setEditedRows((prev) => {
         const newEditedRows = { ...prev };
-        // Удаляем запись, чтобы вернуться к исходному значению из `rows`
         if (newEditedRows[rowIndex]) {
           delete newEditedRows[rowIndex][column];
-          // Если строка стала пустой, удаляем её полностью
           if (Object.keys(newEditedRows[rowIndex]).length === 0) {
             delete newEditedRows[rowIndex];
           }
         }
         return newEditedRows;
       });
-      return; // Выходим, чтобы не сохранять пустое значение
+
+      setChangedCells((prev) => {
+        const newChangedCells = { ...prev };
+        if (newChangedCells[rowIndex]) {
+          delete newChangedCells[rowIndex][column];
+          if (Object.keys(newChangedCells[rowIndex]).length === 0) {
+            delete newChangedCells[rowIndex];
+          }
+        }
+        return newChangedCells;
+      });
+      return;
     }
 
-    // Если значение не пустое — форматируем и сохраняем
-    const formatted = formatNumberValue(value);
-    setEditedRows((prev) => ({
-      ...prev,
-      [rowIndex]: {
-        ...prev[rowIndex],
-        [column]: formatted,
-      },
-    }));
+    // Проверяем, действительно ли значение изменилось
+    const isValueChanged = !valuesAreEqual(value, originalValue);
+
+    if (isValueChanged) {
+      // Если значение изменилось - сохраняем новое
+      const formatted = formatNumberValue(value);
+      setEditedRows((prev) => ({
+        ...prev,
+        [rowIndex]: {
+          ...prev[rowIndex],
+          [column]: {
+            newValue: formatted,
+            originalValue: originalValue,
+          },
+        },
+      }));
+
+      setChangedCells((prev) => ({
+        ...prev,
+        [rowIndex]: {
+          ...prev[rowIndex],
+          [column]: true,
+        },
+      }));
+    } else {
+      // Если значение не изменилось - очищаем editedRows
+      setEditedRows((prev) => {
+        const newEditedRows = { ...prev };
+        if (newEditedRows[rowIndex]) {
+          delete newEditedRows[rowIndex][column];
+          if (Object.keys(newEditedRows[rowIndex]).length === 0) {
+            delete newEditedRows[rowIndex];
+          }
+        }
+        return newEditedRows;
+      });
+
+      setChangedCells((prev) => ({
+        ...prev,
+        [rowIndex]: {
+          ...prev[rowIndex],
+          [column]: false,
+        },
+      }));
+    }
+  };
+
+  const valuesAreEqual = (
+    newValue: string,
+    originalValue: string | number | null | undefined
+  ): boolean => {
+    if (
+      newValue.trim() === "" &&
+      (originalValue === null ||
+        originalValue === undefined ||
+        originalValue === "")
+    ) {
+      return true;
+    }
+
+    // Нормализация для сравнения (удаляем пробелы, заменяем запятые на точки)
+    const normalize = (val: string | number) =>
+      String(val).trim().replace(/\s/g, "").replace(/,/g, ".").toLowerCase();
+
+    const normalizedNew = normalize(newValue);
+    const normalizedOriginal =
+      originalValue !== null && originalValue !== undefined
+        ? normalize(originalValue)
+        : "";
+
+    return normalizedNew === normalizedOriginal;
+  };
+
+  const hasRowChanges = (rowIndex: number): boolean => {
+    if (!editedRows[rowIndex]) return false;
+
+    return Object.entries(editedRows[rowIndex]).some(
+      ([col, data]) => !valuesAreEqual(data.newValue, data.originalValue)
+    );
   };
 
   return (
@@ -314,7 +609,6 @@ function Table() {
           marginTop: "10px",
           marginBottom: "20px",
           backgroundColor: "white",
-          // border: "1px solid black",
           borderRadius: "10px",
           boxShadow: "0px 0px 10px 5px rgb(0, 0, 0, 0.2)",
         }}
@@ -420,6 +714,7 @@ function Table() {
         </div>
 
         <button
+          className={classes.buttonClick}
           style={{
             border: "1px solid black",
             padding: 0,
@@ -429,7 +724,10 @@ function Table() {
             fontWeight: "bold",
             fontSize: "14px",
           }}
-          onClick={fetchTableData}
+          onClick={() => {
+            fetchTableData();
+            fetchAcctData();
+          }}
         >
           Загрузить данные
         </button>
@@ -437,13 +735,12 @@ function Table() {
 
       <div
         style={{
-          display: "flex",
+          display: rows.length === 0 ? "none" : "flex",
           width: "100%",
           overflowX: "hidden",
           position: "relative",
           justifyContent: "center",
           marginBottom: "30px",
-          // border: "1px solid black",
         }}
       >
         {/* Основная таблица с фиксированными колонками */}
@@ -451,275 +748,416 @@ function Table() {
           style={
             {
               display: "flex",
-              // width: "100%",
+              flexDirection: "column",
+              alignItems: "center",
               margin: "20px",
-              overflowX: "auto", // Разрешаем скролл для всей таблицы
+              backgroundColor: "white",
+              borderRadius: "10px",
+              boxShadow: "0px 0px 10px 5px rgb(0, 0, 0, 0.2)",
+              overflowX: "auto",
               scrollbarWidth: "none", // Скрываем скроллбар для Firefox
               msOverflowStyle: "none", // Скрываем скроллбар для IE
               "&::-webkit-scrollbar": { display: "none" }, // Скрываем скроллбар для Chrome/Safari
             } as React.CSSProperties
           }
         >
-          {/* Фиксированная первая колонка (Счет) */}
           <div
             style={{
-              display: rows.length === 0 ? "none" : "",
-              position: "sticky",
-              left: 0,
-              zIndex: 2,
-              backgroundColor: "#e3eff4",
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "center",
+              alignItems: "center",
+              backgroundColor: "white",
+              height: "auto",
+              width: "98%",
+              gap: "10px",
             }}
           >
-            <table
+            <div
               style={{
-                borderCollapse: "collapse",
-                height: "542px",
-                width: "300px",
+                display: "flex",
+                flexDirection: "row",
+                justifyContent: "space-between",
+                marginTop: "10px",
+                width: "100%",
               }}
             >
-              <thead>
-                <tr>
-                  <th
-                    style={{
-                      // Уменьшенный padding
-                      textAlign: "center",
-                      border: "1px solid black",
-                      backgroundColor: "#f9f9f9",
-                      fontWeight: "bold",
-                      height: "50px",
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    Счет
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, rowIndex) => (
-                  <tr
-                    key={rowIndex}
-                    style={{
-                      backgroundColor: rowIndex % 2 === 0 ? "white" : "#f9f9f9",
-                    }}
-                  >
-                    <td
+              <p style={{ margin: 0 }}>Счет</p>
+
+              <select
+                style={{
+                  height: "30px",
+                  width: "500px",
+                  borderRadius: "5px",
+                  marginRight: "350px",
+                }}
+                id="acct"
+                value={selectedAcct}
+                onChange={handleAcctChange}
+              >
+                <option value="">Выберите счёт</option>
+                {acct.map((acct, index) => (
+                  <option key={index} value={acct.description}>
+                    {acct.description}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                className={classes.buttonClick}
+                style={{
+                  backgroundColor: "blue",
+                  color: "white",
+                  display: "flex",
+                  justifyContent: "center",
+                  alignItems: "center",
+                  textAlign: "center",
+                  height: "33px",
+                  width: "250px",
+                }}
+                onClick={addAcctToTable}
+              >
+                Добавить счет
+              </button>
+            </div>
+            <div
+              style={{
+                borderBottom: "1px solid rgba(118, 118, 118, 0.48)",
+                height: "1px",
+                width: "100%",
+              }}
+            ></div>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "row",
+                justifyContent: "space-between",
+                marginBottom: "10px",
+                width: "100%",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                }}
+              >
+                <input
+                  placeholder="Поиск счета"
+                  style={{ height: "25px", width: "250px" }}
+                />
+                <button
+                  className={classes.buttonClick}
+                  style={{
+                    display: "flex",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    height: "30px",
+                    width: "30px",
+                    padding: "0px",
+                    borderColor: "black",
+                  }}
+                >
+                  🔍
+                </button>
+              </div>
+              <div>
+                <button
+                  className={classes.buttonClick}
+                  style={{
+                    display: "flex",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    width: "150px",
+                    height: "30px",
+                    fontSize: "13px",
+                    borderColor: "black",
+                  }}
+                  onClick={saveAllChanges}
+                  disabled={Object.keys(editedRows).length === 0}
+                >
+                  Сохранить все 💾
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", width: "98%" }}>
+            {/* Фиксированная первая колонка (Счет) */}
+            <div
+              style={{
+                display: rows.length === 0 ? "none" : "",
+                position: "sticky",
+                left: 0,
+                zIndex: 2,
+              }}
+            >
+              <table
+                style={{
+                  borderCollapse: "collapse",
+                  width: "300px",
+                }}
+              >
+                <thead>
+                  <tr>
+                    <th
                       style={{
-                        textAlign: "start",
+                        textAlign: "center",
                         border: "1px solid black",
-                        backgroundColor: "rgba(248, 235, 117, 0.48)",
+                        backgroundColor: "#f9f9f9",
+                        fontWeight: "bold",
+                        height: "50px",
                         whiteSpace: "nowrap",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
-                        maxWidth: "20px",
                       }}
-                      title={row.acc_desc}
                     >
-                      {row.acc_desc}
-                    </td>
+                      Счет
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {rows.map((row, rowIndex) => {
+                    return (
+                      <tr
+                        key={rowIndex}
+                        data-row-index={rowIndex}
+                        style={{
+                          backgroundColor:
+                            rowIndex % 2 === 0 ? "white" : "#f9f9f9",
+                          ...(rowIndex === lastAddedRowIndex && {
+                            backgroundColor: "rgba(144, 238, 144, 0.5)",
+                            transition: "background-color 0.5s ease",
+                          }),
+                        }}
+                      >
+                        <td
+                          style={{
+                            textAlign: "start",
+                            border: "1px solid black",
+                            backgroundColor: "rgba(248, 235, 117, 0.48)",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            maxWidth: "20px",
+                            height: "32px",
+                          }}
+                          title={row.acc_desc}
+                        >
+                          {row.acc_desc}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
 
-          {/* Прокручиваемая центральная часть */}
-          <div
-            style={{
-              overflowX: "auto",
-              display: rows.length === 0 ? "none" : "",
-            }}
-          >
-            <table
+            {/* Прокручиваемая центральная часть */}
+            <div
               style={{
-                borderCollapse: "collapse",
+                overflowX: "auto",
+                display: rows.length === 0 ? "none" : "",
               }}
             >
-              <thead>
-                <tr>
-                  {getVisibleColumns().map((col) => (
-                    <th
-                      key={col}
+              <table
+                style={{
+                  borderCollapse: "collapse",
+                }}
+              >
+                <thead>
+                  <tr>
+                    {getVisibleColumns().map((col) => (
+                      <th
+                        key={col}
+                        style={{
+                          height: "50px",
+                          minWidth: "80px",
+                          border: "1px solid black",
+                          backgroundColor: "#f5f5f5",
+                          fontWeight: "bold",
+                        }}
+                      >
+                        {formatColumnHeader(col)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row, rowIndex) => (
+                    <tr
+                      key={rowIndex}
                       style={{
-                        height: "50px",
-                        minWidth: "80px",
+                        backgroundColor:
+                          rowIndex % 2 === 0 ? "white" : "#f9f9f9",
+                      }}
+                    >
+                      {getVisibleColumns().map((col) => {
+                        const editable = isEditable(col);
+                        const cellData = editedRows[rowIndex]?.[col];
+                        const originalValue = row[col];
+                        const displayValue = cellData
+                          ? cellData.newValue
+                          : formatNumberValue(originalValue ?? "");
+                        const isChanged = cellData
+                          ? !valuesAreEqual(
+                              cellData.newValue,
+                              cellData.originalValue
+                            )
+                          : false;
+                        return (
+                          <td
+                            key={col}
+                            className={isChanged ? classes.changedCell : ""}
+                            style={{
+                              textAlign: "center",
+                              border: "1px solid black",
+                              backgroundColor: !editable
+                                ? "rgba(130, 126, 126, 0.48)"
+                                : "white",
+                              ...(rowIndex === lastAddedRowIndex && {
+                                backgroundColor: "rgba(144, 238, 144, 0.5)",
+                                transition: "background-color 0.5s ease",
+                              }),
+                              position: "relative", // Важно для позиционирования уголка
+                            }}
+                          >
+                            {editable ? (
+                              <input
+                                style={{
+                                  width: "80px",
+                                  height: "30px",
+                                  textAlign: "end",
+                                  border: "none",
+                                  ...(rowIndex === lastAddedRowIndex && {
+                                    backgroundColor: "rgba(144, 238, 144, 0.5)",
+                                    transition: "background-color 0.5s ease",
+                                  }),
+                                }}
+                                type="text"
+                                value={displayValue}
+                                onChange={(e) =>
+                                  handleCellChange(
+                                    rowIndex,
+                                    col,
+                                    e.target.value
+                                  )
+                                }
+                                onBlur={(e) => {
+                                  handleCellBlur(rowIndex, col, e.target.value);
+                                }}
+                                onFocus={(e) => {
+                                  const rawValue =
+                                    cellData?.newValue ?? row[col];
+                                  e.target.value =
+                                    rawValue !== null && rawValue !== undefined
+                                      ? String(rawValue)
+                                          .replace(/\s/g, "")
+                                          .replace(/,/g, ".")
+                                      : "";
+                                  e.target.select();
+                                }}
+                              />
+                            ) : (
+                              <div
+                                style={{
+                                  display: "flex",
+                                  justifyContent: "end",
+                                  width: "80px",
+                                  fontSize: "14px",
+                                }}
+                              >
+                                {formatNumberValue(displayValue)}
+                              </div>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Фиксированная последняя колонка (кнопка) */}
+            <div
+              style={{
+                display: rows.length === 0 ? "none" : "",
+                position: "sticky",
+                right: 0,
+                zIndex: 2,
+              }}
+            >
+              <table
+                style={{
+                  borderCollapse: "collapse",
+                  width: "100px",
+                }}
+              >
+                <thead>
+                  <tr>
+                    <th
+                      style={{
+                        textAlign: "center",
                         border: "1px solid black",
                         backgroundColor: "#f5f5f5",
                         fontWeight: "bold",
+                        height: "50px",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
                       }}
                     >
-                      {formatColumnHeader(col)}
+                      Сохранить
                     </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, rowIndex) => (
-                  <tr
-                    key={rowIndex}
-                    style={{
-                      backgroundColor: rowIndex % 2 === 0 ? "white" : "#f9f9f9",
-                    }}
-                  >
-                    {getVisibleColumns().map((col) => {
-                      const editable = isEditable(col);
-                      const value =
-                        editedRows[rowIndex]?.[col] ?? row[col] ?? "";
-
-                      return (
-                        <td
-                          key={col}
-                          style={{
-                            textAlign: "center",
-                            padding: "8px",
-                            border: "1px solid black",
-                            backgroundColor: !editable
-                              ? "rgba(130, 126, 126, 0.48)"
-                              : "white",
-                          }}
-                        >
-                          {editable ? (
-                            <input
-                              style={{
-                                width: "80px",
-                                height: "30px",
-                                textAlign: "end",
-                                border: "none",
-                              }}
-                              type="text"
-                              value={
-                                editedRows[rowIndex]?.[col] !== undefined
-                                  ? editedRows[rowIndex][col]
-                                  : formatNumberValue(row[col])
-                              }
-                              onChange={(e) =>
-                                handleCellChange(rowIndex, col, e.target.value)
-                              }
-                              onBlur={(e) => {
-                                if (e.target.value.trim() === "") {
-                                  const prevValue = row[col];
-                                  // Преобразуем значение к строке и проверяем на null/undefined
-                                  const stringValue =
-                                    prevValue !== null &&
-                                    prevValue !== undefined
-                                      ? String(prevValue)
-                                      : ""; // или другое значение по умолчанию
-
-                                  setEditedRows((prev) => ({
-                                    ...prev,
-                                    [rowIndex]: {
-                                      ...prev[rowIndex],
-                                      [col]: stringValue, // Теперь точно строка
-                                    },
-                                  }));
-                                } else {
-                                  handleCellBlur(rowIndex, col, e.target.value);
-                                }
-                              }}
-                              onFocus={(e) => {
-                                // При фокусе показываем "сырое" число без форматирования
-                                const rawValue =
-                                  editedRows[rowIndex]?.[col] ?? row[col];
-                                e.target.value =
-                                  rawValue !== null && rawValue !== undefined
-                                    ? String(rawValue)
-                                        .replace(/\s/g, "")
-                                        .replace(/,/g, ".")
-                                    : "";
-                                e.target.select();
-                              }}
-                            />
-                          ) : (
-                            <div
-                              style={{
-                                display: "flex",
-                                justifyContent: "end",
-                                width: "80px",
-                                fontSize: "14px",
-                              }}
-                            >
-                              {formatNumberValue(value)}
-                            </div>
-                          )}
-                        </td>
-                      );
-                    })}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Фиксированная последняя колонка (кнопка) */}
-          <div
-            style={{
-              display: rows.length === 0 ? "none" : "",
-              position: "sticky",
-              right: 0,
-              zIndex: 2,
-              backgroundColor: "#e3eff4",
-            }}
-          >
-            <table
-              style={{
-                borderCollapse: "collapse",
-                height: "542px",
-                width: "100px",
-              }}
-            >
-              <thead>
-                <tr>
-                  <th
-                    style={{
-                      // padding: "8px",
-                      textAlign: "center",
-                      border: "1px solid black",
-                      backgroundColor: "#f5f5f5",
-                      fontWeight: "bold",
-                      height: "50px",
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    Сохранить
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, rowIndex) => (
-                  <tr
-                    key={rowIndex}
-                    style={{
-                      backgroundColor: rowIndex % 2 === 0 ? "white" : "#f9f9f9",
-                    }}
-                  >
-                    <td
+                </thead>
+                <tbody>
+                  {rows.map((row, rowIndex) => (
+                    <tr
+                      key={rowIndex}
                       style={{
-                        padding: "8px",
-                        textAlign: "center",
-                        border: "1px solid black",
-                        width: "40px",
+                        backgroundColor:
+                          rowIndex % 2 === 0 ? "white" : "#f9f9f9",
+                        ...(rowIndex === lastAddedRowIndex && {
+                          backgroundColor: "rgba(144, 238, 144, 0.5)",
+                          transition: "background-color 0.5s ease",
+                        }),
                       }}
                     >
-                      <button
+                      <td
                         style={{
-                          border: "1px solid #ccc",
-                          background: "white",
-                          cursor: "pointer",
-                          padding: "2px 5px",
-                          borderRadius: "3px",
+                          textAlign: "center",
+                          border: "1px solid black",
+                          width: "40px",
+                          height: "32px",
                         }}
-                        onClick={() => saveChanges(rowIndex)}
                       >
-                        💾
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                        <button
+                          style={{
+                            border: "1px solid #ccc",
+                            background: "white",
+                            cursor: hasRowChanges(rowIndex)
+                              ? "pointer"
+                              : "not-allowed",
+                            padding: "2px 5px",
+                            borderRadius: "3px",
+                            opacity: hasRowChanges(rowIndex) ? 1 : 0.5,
+                          }}
+                          onClick={() =>
+                            hasRowChanges(rowIndex) && saveChanges(rowIndex)
+                          }
+                          disabled={!hasRowChanges(rowIndex)}
+                        >
+                          💾
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>

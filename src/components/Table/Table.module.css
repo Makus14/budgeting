@@ -1,0 +1,30 @@
+.changedCell {
+  position: relative;
+}
+
+.changedCell::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 10px;
+  height: 8px;
+  background-color: #059d26;
+  border-bottom-left-radius: 6px;
+  z-index: 1;
+}
+
+/* Для темной темы */
+.darkMode .changedCell::after {
+  background-color: #177ddc;
+}
+
+.buttonClick {
+  cursor: pointer;
+  transition: transform 0.2s ease, background-color 0.1s;
+}
+
+.buttonClick:active {
+  transform: scale(0.95);
+  background-color: #7c7a80;
+}
