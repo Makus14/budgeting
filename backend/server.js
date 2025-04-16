@@ -342,6 +342,36 @@ app.post("/addAcct", async (req, res) => {
   }
 });
 
+app.get("/search", async (req, res) => {
+  const { time_year, sce_id, cfo_id, query } = req.query;
+
+  if (!time_year || !sce_id || !cfo_id || !query) {
+    return res.status(400).send("Необходимые параметры отсутствуют");
+  }
+
+  try {
+    const searchQuery = `
+      SELECT *
+      FROM data_mart."v_plan"
+      WHERE time_year = $1
+        AND sce_id = $2
+        AND cfo_id = $3
+        AND upper(acc_desc) ~ upper($4)
+      ORDER BY p_id;
+    `;
+    const result = await client.query(searchQuery, [
+      time_year,
+      sce_id,
+      cfo_id,
+      query,
+    ]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Ошибка при поиске:", err);
+    res.status(500).send("Ошибка сервера при поиске");
+  }
+});
+
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
 });

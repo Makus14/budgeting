@@ -114,6 +114,8 @@ function Table() {
     null
   );
 
+  const [searchQuery, setSearchQuery] = useState<string>("");
+
   useEffect(() => {
     fetch("http://localhost:3000/years")
       .then((response) => response.json())
@@ -411,6 +413,29 @@ function Table() {
     );
     setSelectedAcct(selectedAcct);
     setSelectedIdAcct(selectedOption ? selectedOption.id : "");
+  };
+
+  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchQuery(event.target.value);
+  };
+
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) {
+      fetchTableData();
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `http://localhost:3000/search?time_year=${selectedYear}&sce_id=${selectedIdSce}&cfo_id=${selectedIdCfo}&query=${encodeURIComponent(
+          searchQuery
+        )}`
+      );
+      const data = await response.json();
+      setRows(data);
+    } catch (error) {
+      console.error("Ошибка при поиске:", error);
+    }
   };
 
   const getVisibleColumns = () => {
@@ -846,6 +871,9 @@ function Table() {
                 <input
                   placeholder="Поиск счета"
                   style={{ height: "25px", width: "250px" }}
+                  value={searchQuery}
+                  onChange={handleSearchChange}
+                  onKeyPress={(e) => e.key === "Enter" && handleSearch()}
                 />
                 <button
                   className={classes.buttonClick}
@@ -858,6 +886,7 @@ function Table() {
                     padding: "0px",
                     borderColor: "black",
                   }}
+                  onClick={handleSearch}
                 >
                   🔍
                 </button>
