@@ -60,6 +60,7 @@ interface Cfo {
 }
 
 interface Acct {
+  acc_code: string;
   description: string;
   id: string;
 }
@@ -823,7 +824,9 @@ function Table() {
                 <option value="">Выберите счёт</option>
                 {acct.map((acct, index) => (
                   <option key={index} value={acct.description}>
-                    {acct.description}
+                    {acct.acc_code
+                      ? `(${acct.acc_code}) ${acct.description}`
+                      : acct.description}
                   </option>
                 ))}
               </select>

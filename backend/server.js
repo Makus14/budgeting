@@ -148,7 +148,21 @@ app.get("/acct", async (req, res) => {
   }
 
   try {
-    const query = `SELECT * FROM dim_app.v_dim_acc WHERE is_root IS FALSE AND description NOT IN (SELECT acc_desc FROM data_mart.v_plan WHERE time_year = $1 AND sce_id = $2 AND cfo_id = $3)`;
+    const query = `SELECT 
+    parent AS acc_code,
+    description,
+    id
+  FROM dim_app.v_dim_acc 
+  WHERE is_root IS FALSE 
+    AND NOT EXISTS (
+      SELECT 1 
+      FROM data_mart.v_plan 
+      WHERE time_year = $1 
+        AND sce_id = $2 
+        AND cfo_id = $3
+        AND acc_desc = description
+        AND acc_code = parent
+    )`;
     const result = await client.query(query, [time_year, sce_id, cfo_id]);
     res.json(result.rows);
   } catch (err) {
